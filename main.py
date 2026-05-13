@@ -1,7 +1,7 @@
 """
 Task Scheduler Agent — orchestrator.
 
-`run_pipeline()` runs M1 -> M2 -> M3 -> M4 -> M5 (M6 not wired yet).
+`run_pipeline()` runs M1 -> M2 -> M3 -> M4 -> M5. Use `--test` for a single run or `--daemon` for a timed loop (M6 not wired yet).
 """
 
 from __future__ import annotations
@@ -10,8 +10,12 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
+
+import schedule
+from dotenv import load_dotenv
 
 # Project root (directory containing this file) on sys.path for imports
 _ROOT = Path(__file__).resolve().parent
@@ -101,13 +105,14 @@ def run_pipeline() -> dict[str, Any]:
     except Exception as e:
         print(f"[ERROR][pipeline] check_pending_timeouts: {e}")
 
+    # Fresh load after M4 + timeouts so same-run DEMO_MODE approvals are visible to M5.
     try:
         final_store = file_store.load_task_store()
         final_tasks = final_store.get("tasks", [])
         if not isinstance(final_tasks, list):
             final_tasks = []
     except Exception as e:
-        print(f"[ERROR][pipeline] load_task_store after M4: {e}")
+        print(f"[ERROR][pipeline] load_task_store before M5: {e}")
         final_tasks = scored_tasks
 
     m5_booked = 0
@@ -116,20 +121,40 @@ def run_pipeline() -> dict[str, Any]:
     for task in final_tasks:
         if not isinstance(task, dict):
             continue
-        if task.get("calendar_event_id"):
-            m5_skipped += 1
-            continue
-        st = str(task.get("status", ""))
+        title = str(task.get("title") or "(no title)")
+        st = str(task.get("status") or "")
         needs = bool(task.get("needs_approval"))
-        eligible = st == "approved" or (st == "extracted" and not needs)
-        if not eligible:
+        timed_out = bool(task.get("timed_out"))
+
+        if task.get("calendar_event_id"):
+            print(f"[M5] Skipping {title}: status={st}, timed_out={timed_out}")
             m5_skipped += 1
             continue
+
+        if timed_out:
+            print(f"[M5] Skipping {title}: status={st}, timed_out={timed_out}")
+            m5_skipped += 1
+            continue
+
+        # M5 runs only for: approved, auto_scheduled (retry without event), or
+        # auto-extracted path (extracted + not needs_approval).
+        # Skips: pending_approval, dismissed, scheduled, unschedulable, timed_out (above).
+        eligible = (
+            st == "approved"
+            or st == "auto_scheduled"
+            or (st == "extracted" and not needs)
+        )
+        if not eligible:
+            print(f"[M5] Skipping {title}: status={st}, timed_out={timed_out}")
+            m5_skipped += 1
+            continue
+
         try:
             ev = find_and_book_slot(task)
             if ev:
                 m5_booked += 1
             else:
+                print(f"[M5] Skipping {title}: status={st}, timed_out={timed_out}")
                 m5_skipped += 1
         except Exception as e:
             print(f"[ERROR][pipeline] M5 failed for task {task.get('id')!r}: {e}")
@@ -171,6 +196,54 @@ def run_pipeline() -> dict[str, Any]:
     return summary
 
 
+def run_daemon_loop(
+    poll_minutes: int | None = None,
+    *,
+    run_immediately: bool = True,
+) -> None:
+    """
+    Run `run_pipeline()` on an interval (production-style loop).
+
+    Does not set CHRONA_SKIP_LAST_RUN_UPDATE (M1 advances last_run as configured).
+
+    Args:
+        poll_minutes: Override interval; if None, uses CHRONA_POLL_MINUTES env or 5.
+        run_immediately: If True, run one pipeline cycle before entering the wait loop.
+    """
+    pm = poll_minutes if poll_minutes is not None else int(os.getenv("CHRONA_POLL_MINUTES", "5"))
+    pm = max(1, pm)
+
+    your_name = os.getenv("YOUR_NAME", "")
+    your_email = os.getenv("YOUR_EMAIL", "")
+    tz = os.getenv("TIMEZONE", "Asia/Kolkata")
+    digest = os.getenv("DIGEST_TIME", "08:00")
+    demo = os.getenv("DEMO_MODE", "false")
+
+    def _job() -> None:
+        try:
+            run_pipeline()
+        except Exception as e:
+            print(f"[ERROR][daemon] run_pipeline: {e}")
+
+    print("=" * 50)
+    print("Task Scheduler Agent (daemon)")
+    print(f"Pipeline every {pm} minute(s) (M1->M2->M3->M4->M5)")
+    print(f"Morning digest time (env): {digest}")
+    print(f"User: {your_name} ({your_email})")
+    print(f"Timezone: {tz}")
+    print(f"DEMO_MODE: {demo}")
+    print("Ctrl+C to stop")
+    print("=" * 50)
+
+    schedule.every(pm).minutes.do(_job)
+    if run_immediately:
+        _job()
+
+    while True:
+        schedule.run_pending()
+        time.sleep(30)
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Task Scheduler Agent")
     p.add_argument(
@@ -184,11 +257,33 @@ def _parse_args() -> argparse.Namespace:
         dest="m1_m2",
         help="Alias for --test (full M1->M2->M3->M4->M5 run)",
     )
+    p.add_argument(
+        "--daemon",
+        action="store_true",
+        help="Run pipeline on a timer (CHRONA_POLL_MINUTES, default 5). Updates last_run.",
+    )
+    p.add_argument(
+        "--poll-minutes",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --daemon: poll interval in minutes (overrides CHRONA_POLL_MINUTES)",
+    )
     return p.parse_args()
 
 
 def main() -> None:
+    load_dotenv()
     args = _parse_args()
+    if args.daemon and (args.test or args.m1_m2):
+        print("[ERROR] Use either --daemon or --test/--m1-m2, not both.")
+        sys.exit(2)
+    if args.daemon:
+        try:
+            run_daemon_loop(args.poll_minutes)
+        except KeyboardInterrupt:
+            print("\n[daemon] Stopped.")
+        return
     if args.test or args.m1_m2:
         os.environ["CHRONA_SKIP_LAST_RUN_UPDATE"] = "true"
         try:
@@ -197,8 +292,10 @@ def main() -> None:
         finally:
             os.environ.pop("CHRONA_SKIP_LAST_RUN_UPDATE", None)
         return
-    print("Usage: python main.py --test   (or --m1-m2)")
-    print("Runs M1->M2->M3->M4->M5 pipeline once and prints JSON summary.")
+    print("Usage:")
+    print("  python main.py --test          # one-shot pipeline (skip last_run bump)")
+    print("  python main.py --daemon        # continuous M1->M5 every N minutes")
+    print("  python scripts/continuous_unittest.py   # re-run unit tests on an interval")
 
 
 if __name__ == "__main__":
