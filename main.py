@@ -1,7 +1,7 @@
 """
 Task Scheduler Agent — orchestrator.
 
-`run_pipeline()` runs M1 -> M2 -> M3 -> M4 (M5+ not wired yet).
+`run_pipeline()` runs M1 -> M2 -> M3 -> M4 -> M5 (M6 not wired yet).
 """
 
 from __future__ import annotations
@@ -22,16 +22,17 @@ if str(_ROOT) not in sys.path:
 def run_pipeline() -> dict[str, Any]:
     """
     Run M1 (fetch/filter), M2 (extract per email), M3 (dedupe + score + persist),
-    then M4 (Slack approval DMs + timeout sweep).
+    then M4 (Slack approval DMs + timeout sweep), then M5 (calendar booking).
 
     Returns:
         JSON-serializable summary including final tasks from task_store.json
-        after M3/M4 side effects.
+        after M3/M4/M5 side effects.
     """
     from modules.m1_watcher import fetch_and_filter_emails
     from modules.m2_extractor import extract_tasks
     from modules.m3_scorer import dedup_and_score
     from modules.m4_approval import check_pending_timeouts, send_approval_request
+    from modules.m5_scheduler import find_and_book_slot
     from utils import file_store
 
     try:
@@ -109,6 +110,39 @@ def run_pipeline() -> dict[str, Any]:
         print(f"[ERROR][pipeline] load_task_store after M4: {e}")
         final_tasks = scored_tasks
 
+    m5_booked = 0
+    m5_skipped = 0
+    m5_errors = 0
+    for task in final_tasks:
+        if not isinstance(task, dict):
+            continue
+        if task.get("calendar_event_id"):
+            m5_skipped += 1
+            continue
+        st = str(task.get("status", ""))
+        needs = bool(task.get("needs_approval"))
+        eligible = st == "approved" or (st == "extracted" and not needs)
+        if not eligible:
+            m5_skipped += 1
+            continue
+        try:
+            ev = find_and_book_slot(task)
+            if ev:
+                m5_booked += 1
+            else:
+                m5_skipped += 1
+        except Exception as e:
+            print(f"[ERROR][pipeline] M5 failed for task {task.get('id')!r}: {e}")
+            m5_errors += 1
+
+    try:
+        final_store = file_store.load_task_store()
+        final_tasks = final_store.get("tasks", [])
+        if not isinstance(final_tasks, list):
+            final_tasks = []
+    except Exception as e:
+        print(f"[ERROR][pipeline] load_task_store after M5: {e}")
+
     m3_needs_approval = sum(
         1 for t in final_tasks if isinstance(t, dict) and t.get("needs_approval")
     )
@@ -122,13 +156,17 @@ def run_pipeline() -> dict[str, Any]:
         "m3_tasks": final_tasks,
         "m4_approval_sent": m4_sent,
         "m4_approval_failed": m4_failed,
+        "m5_booked": m5_booked,
+        "m5_skipped": m5_skipped,
+        "m5_errors": m5_errors,
     }
     print(
-        f"[pipeline] M1->M2->M3->M4 complete: {summary['email_count']} email(s), "
+        f"[pipeline] M1->M2->M3->M4->M5 complete: {summary['email_count']} email(s), "
         f"{summary['task_count']} extracted, "
         f"{summary['m3_stored_task_count']} task(s) in store, "
         f"{m3_needs_approval} need approval, "
-        f"M4 sent {m4_sent} / failed {m4_failed}"
+        f"M4 sent {m4_sent} / failed {m4_failed}, "
+        f"M5 booked {m5_booked} (skipped {m5_skipped}, errors {m5_errors})"
     )
     return summary
 
@@ -138,13 +176,13 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--test",
         action="store_true",
-        help="Run pipeline once (M1->M2->M3->M4) and exit",
+        help="Run pipeline once (M1->M2->M3->M4->M5) and exit",
     )
     p.add_argument(
         "--m1-m2",
         action="store_true",
         dest="m1_m2",
-        help="Alias for --test (full M1->M2->M3->M4 run)",
+        help="Alias for --test (full M1->M2->M3->M4->M5 run)",
     )
     return p.parse_args()
 
@@ -160,7 +198,7 @@ def main() -> None:
             os.environ.pop("CHRONA_SKIP_LAST_RUN_UPDATE", None)
         return
     print("Usage: python main.py --test   (or --m1-m2)")
-    print("Runs M1->M2->M3->M4 pipeline once and prints JSON summary.")
+    print("Runs M1->M2->M3->M4->M5 pipeline once and prints JSON summary.")
 
 
 if __name__ == "__main__":

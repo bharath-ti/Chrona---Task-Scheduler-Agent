@@ -17,10 +17,9 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-SCOPES: list[str] = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
-]
+from utils.google_scopes import GOOGLE_OAUTH_SCOPES
+
+SCOPES: list[str] = GOOGLE_OAUTH_SCOPES
 
 
 def _credentials_path() -> str:

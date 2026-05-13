@@ -53,9 +53,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_m1_empty_no_m2_m3_calls(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.return_value = []
         mock_m3.return_value = []
@@ -66,6 +67,7 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
         self.assertEqual(out["items"], [])
         self.assertEqual(out["m3_stored_task_count"], 0)
         self.assertEqual(out["m4_approval_sent"], 0)
+        self.assertEqual(out["m5_booked"], 0)
         mock_m2.assert_not_called()
         mock_m3.assert_called_once_with([])
         mock_send.assert_not_called()
@@ -76,9 +78,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_one_email_tasks_passed_to_m3(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.return_value = [_sample_email()]
         mock_m2.return_value = [_sample_task("A"), _sample_task("B")]
@@ -104,9 +107,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_one_email_zero_tasks_m3_empty_input(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.return_value = [_sample_email(subject="FYI")]
         mock_m2.return_value = []
@@ -122,9 +126,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_multiple_emails_flatten_order_for_m3(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.return_value = [
             _sample_email(mid="a", subject="S1"),
@@ -152,9 +157,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_m2_raises_pipeline_continues_m3_runs(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.return_value = [
             _sample_email(mid="x", subject="Bad"),
@@ -178,9 +184,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_m2_returns_non_list_coerced_to_empty(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.return_value = [_sample_email()]
         mock_m2.return_value = None  # type: ignore[assignment]
@@ -195,9 +202,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_m1_raises_returns_empty_pipeline(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.side_effect = RuntimeError("Gmail down")
         mock_m3.return_value = []
@@ -213,9 +221,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_m1_returns_non_list_coerced_to_empty(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.return_value = None  # type: ignore[assignment]
         mock_m3.return_value = []
@@ -230,9 +239,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_transcript_flag_preserved_on_item(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.return_value = [_sample_email(is_transcript=True)]
         mock_m2.return_value = []
@@ -248,9 +258,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_m3_raises_empty_m3_tasks(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.return_value = [_sample_email()]
         mock_m2.return_value = [_sample_task()]
@@ -265,9 +276,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_m4_sends_for_extracted_needs_approval(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.return_value = [_sample_email()]
         mock_m2.return_value = [_sample_task()]
@@ -295,9 +307,10 @@ class TestPipelineM1M2M3M4(unittest.TestCase):
     @patch("modules.m4_approval.send_approval_request")
     @patch("modules.m3_scorer.dedup_and_score")
     @patch("modules.m2_extractor.extract_tasks")
+    @patch("modules.m5_scheduler.find_and_book_slot", return_value=None)
     @patch("modules.m1_watcher.fetch_and_filter_emails")
     def test_m4_skips_already_pending_or_slacked(
-        self, mock_m1, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
+        self, mock_m1, mock_m5, mock_m2, mock_m3, mock_send, mock_timeout, mock_load
     ) -> None:
         mock_m1.return_value = [_sample_email()]
         mock_m2.return_value = [_sample_task()]

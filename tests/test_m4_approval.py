@@ -46,9 +46,10 @@ class TestBuildSlackBlocks(unittest.TestCase):
 
 
 class TestSendApprovalRequest(unittest.TestCase):
+    @patch("modules.m5_scheduler.find_next_free_slot", return_value="10:00 AM – 11:00 AM tomorrow")
     @patch.object(m4_approval.file_store, "update_task")
     @patch.object(m4_approval.slack_client, "send_dm")
-    def test_demo_mode_approves_after_send(self, mock_send, mock_update) -> None:
+    def test_demo_mode_approves_after_send(self, mock_send, mock_update, _mock_slot) -> None:
         mock_send.return_value = {"ts": "1.2", "channel": "D123"}
         with patch.dict("os.environ", {"DEMO_MODE": "true", "SLACK_USER_ID": "U1"}, clear=False):
             ok = m4_approval.send_approval_request(_task(title="T1"))
@@ -59,9 +60,10 @@ class TestSendApprovalRequest(unittest.TestCase):
         self.assertEqual(args[0], "task-uuid-1")
         self.assertEqual(args[1]["status"], "approved")
 
+    @patch("modules.m5_scheduler.find_next_free_slot", return_value="10:00 AM – 11:00 AM tomorrow")
     @patch.object(m4_approval.file_store, "update_task")
     @patch.object(m4_approval.slack_client, "send_dm")
-    def test_normal_mode_pending_after_send(self, mock_send, mock_update) -> None:
+    def test_normal_mode_pending_after_send(self, mock_send, mock_update, _mock_slot) -> None:
         mock_send.return_value = {"ts": "1.2", "channel": "D123"}
         with patch.dict("os.environ", {"DEMO_MODE": "false", "SLACK_USER_ID": "U1"}, clear=False):
             ok = m4_approval.send_approval_request(_task())
@@ -69,9 +71,10 @@ class TestSendApprovalRequest(unittest.TestCase):
         self.assertEqual(mock_update.call_args[0][1]["status"], "pending_approval")
         self.assertIn("pending_approval_at", mock_update.call_args[0][1])
 
+    @patch("modules.m5_scheduler.find_next_free_slot", return_value=None)
     @patch.object(m4_approval.slack_client, "send_dm", return_value=None)
     @patch.object(m4_approval.file_store, "update_task")
-    def test_send_failure_no_store_update(self, mock_update, _mock_send) -> None:
+    def test_send_failure_no_store_update(self, mock_update, _mock_send, _mock_slot) -> None:
         with patch.dict("os.environ", {"SLACK_USER_ID": "U1"}, clear=False):
             ok = m4_approval.send_approval_request(_task())
         self.assertFalse(ok)
