@@ -135,6 +135,66 @@ class TestDedupAndScore(unittest.TestCase):
         self.assertIn("transcript", out[0]["sources"])
         self.assertEqual(out[0]["seen_count"], 2)
 
+    def test_merge_same_source_message_id_preserves_workflow_status(self) -> None:
+        """Re-extracted task from same Gmail id merges into existing row without reset."""
+        mem = {
+            "tasks": [
+                {
+                    "id": "existing-msg",
+                    "source_message_id": "gmail-msg-42",
+                    "title": "Finish the project plan",
+                    "description": "old",
+                    "deadline": None,
+                    "estimated_minutes": 60,
+                    "source": "email",
+                    "sources": ["email"],
+                    "sender": "a@b.com",
+                    "sender_name": "A",
+                    "sender_role": "peer",
+                    "sender_weight": 5,
+                    "urgency": "medium",
+                    "raw_snippet": "r",
+                    "priority_score": 1.0,
+                    "needs_approval": True,
+                    "status": "pending_approval",
+                    "slack_message_ts": "99.88",
+                    "calendar_event_id": None,
+                    "seen_count": 1,
+                    "created_at": "2026-01-01T00:00:00+05:30",
+                    "updated_at": "2026-01-01T00:00:00+05:30",
+                }
+            ],
+            "last_cleared": None,
+        }
+
+        def fake_load() -> dict:
+            return json.loads(json.dumps(mem))
+
+        new_tasks = [
+            {
+                "title": "finish project plan document",
+                "description": "from LLM again",
+                "deadline": None,
+                "estimated_minutes": 90,
+                "urgency": "high",
+                "raw_snippet": "r2",
+                "source": "email",
+                "source_message_id": "gmail-msg-42",
+                "sender": "a@b.com",
+                "sender_name": "A",
+                "sender_role": "peer",
+                "sender_weight": 5,
+            }
+        ]
+        with patch.object(file_store, "load_task_store", side_effect=fake_load):
+            with patch.object(file_store, "save_task_store"):
+                out = m3_scorer.dedup_and_score(new_tasks)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["id"], "existing-msg")
+        self.assertEqual(out[0]["status"], "pending_approval")
+        self.assertEqual(out[0]["slack_message_ts"], "99.88")
+        self.assertEqual(out[0]["source_message_id"], "gmail-msg-42")
+
     def test_vp_needs_approval_despite_low_score_math(self) -> None:
         """Role VP forces needs_approval per spec."""
         mem = {"tasks": [], "last_cleared": None}

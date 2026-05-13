@@ -208,6 +208,35 @@ def _find_duplicate_index(combined: list[dict], title: str) -> int | None:
     return None
 
 
+def _source_message_id_key(partial: dict) -> str | None:
+    mid = partial.get("source_message_id") or partial.get("message_id")
+    if mid is None:
+        return None
+    s = str(mid).strip()
+    return s or None
+
+
+def _find_duplicate_for_partial(combined: list[dict], partial: dict) -> int | None:
+    """
+    Prefer matching an existing task from the same Gmail message_id + similar title,
+    then fall back to title-only overlap (re-extraction / same email run).
+    """
+    mid = _source_message_id_key(partial)
+    pt = str(partial.get("title", "")).strip()
+    if mid:
+        for i, t in enumerate(combined):
+            if str(t.get("source_message_id", "")).strip() != mid:
+                continue
+            if _word_overlap(str(t.get("title", "")), pt) > 0.70:
+                return i
+        for i, t in enumerate(combined):
+            if str(t.get("source_message_id", "")).strip() != mid:
+                continue
+            if str(t.get("title", "")).strip().lower() == pt.lower():
+                return i
+    return _find_duplicate_index(combined, pt)
+
+
 def _merge_into(into: dict, fr: dict) -> None:
     """Merge duplicate `fr` into canonical `into` (first occurrence)."""
     into["deadline"] = _earliest_deadline(into.get("deadline"), fr.get("deadline"))
@@ -230,6 +259,10 @@ def _merge_into(into: dict, fr: dict) -> None:
 
     into["seen_count"] = int(into.get("seen_count", 1)) + 1
     into["updated_at"] = _now_iso()
+
+    fr_mid = str(fr.get("source_message_id") or "").strip()
+    if fr_mid and not str(into.get("source_message_id") or "").strip():
+        into["source_message_id"] = fr_mid
 
     st = str(into.get("status", "extracted"))
     if st not in _WORKFLOW_STATUSES:
@@ -260,7 +293,8 @@ def _new_full_task_from_m2(raw: dict) -> dict:
     if em < 1:
         em = 1
 
-    return {
+    smid = str(raw.get("source_message_id") or raw.get("message_id") or "").strip()
+    row: dict[str, Any] = {
         "id": str(uuid.uuid4()),
         "title": str(raw.get("title", "")).strip(),
         "description": str(raw.get("description", "")).strip(),
@@ -283,6 +317,9 @@ def _new_full_task_from_m2(raw: dict) -> dict:
         "created_at": now,
         "updated_at": now,
     }
+    if smid:
+        row["source_message_id"] = smid
+    return row
 
 
 def _assign_ids_and_defaults(tasks: list[dict]) -> list[dict]:
@@ -339,7 +376,7 @@ def dedup_and_score(new_tasks: list[dict]) -> list[dict]:
             title = str(raw.get("title", "")).strip()
             if not title:
                 continue
-            dup_idx = _find_duplicate_index(combined, title)
+            dup_idx = _find_duplicate_for_partial(combined, raw)
             if dup_idx is not None:
                 _merge_into(combined[dup_idx], raw)
             else:

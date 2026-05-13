@@ -250,7 +250,10 @@ def fetch_and_filter_emails() -> list[dict]:
                 }
             )
         print(f"[M1] Fetched {len(raw)} emails, {len(filtered)} passed filters")
-        _update_last_run()
+        if os.getenv("CHRONA_SKIP_LAST_RUN_UPDATE", "").lower() != "true":
+            _update_last_run()
+        else:
+            print("[M1] Skipping last_run update (CHRONA_SKIP_LAST_RUN_UPDATE=true)")
         return filtered
     except Exception as e:
         print(f"[ERROR][M1] fetch_and_filter_emails failed: {e}")

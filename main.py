@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -151,8 +152,12 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     if args.test or args.m1_m2:
-        result = run_pipeline()
-        print(json.dumps(result, indent=2, default=str))
+        os.environ["CHRONA_SKIP_LAST_RUN_UPDATE"] = "true"
+        try:
+            result = run_pipeline()
+            print(json.dumps(result, indent=2, default=str))
+        finally:
+            os.environ.pop("CHRONA_SKIP_LAST_RUN_UPDATE", None)
         return
     print("Usage: python main.py --test   (or --m1-m2)")
     print("Runs M1->M2->M3->M4 pipeline once and prints JSON summary.")

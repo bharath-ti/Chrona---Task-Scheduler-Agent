@@ -104,6 +104,7 @@ def _parse_response(response_text: str, email: dict) -> list[dict]:
         return []
 
     source = "transcript" if email.get("is_transcript") else "email"
+    source_message_id = str(email.get("message_id") or "").strip()
     sender = str(email.get("sender_email") or "")
     sender_name = str(email.get("sender_name") or "")
     sender_role = str(email.get("sender_role") or "")
@@ -141,21 +142,22 @@ def _parse_response(response_text: str, email: dict) -> list[dict]:
         if urg not in _URGENCY_ALLOWED:
             urg = "medium"
 
-        out.append(
-            {
-                "title": title,
-                "description": description,
-                "deadline": deadline,
-                "estimated_minutes": estimated_minutes,
-                "urgency": urg,
-                "raw_snippet": raw_snippet,
-                "source": source,
-                "sender": sender,
-                "sender_name": sender_name,
-                "sender_role": sender_role,
-                "sender_weight": sender_weight,
-            }
-        )
+        row: dict = {
+            "title": title,
+            "description": description,
+            "deadline": deadline,
+            "estimated_minutes": estimated_minutes,
+            "urgency": urg,
+            "raw_snippet": raw_snippet,
+            "source": source,
+            "sender": sender,
+            "sender_name": sender_name,
+            "sender_role": sender_role,
+            "sender_weight": sender_weight,
+        }
+        if source_message_id:
+            row["source_message_id"] = source_message_id
+        out.append(row)
     return out
 
 
@@ -170,7 +172,8 @@ def extract_tasks(email: dict) -> list[dict]:
     Returns:
         List of partial task dicts (without id, status, priority_score — M3 adds those).
         Each dict has: title, description, deadline, estimated_minutes, urgency,
-                       raw_snippet, source, sender, sender_name, sender_role, sender_weight
+                       raw_snippet, source, sender, sender_name, sender_role, sender_weight,
+                       and source_message_id when the email has message_id (for M3 dedupe).
         Returns [] if no tasks found or on API error.
     """
     try:
