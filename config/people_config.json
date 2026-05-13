@@ -1,0 +1,28 @@
+{
+  "people": [
+    {
+      "email": "arlief@company.com",
+      "name": "Arlief",
+      "role": "VP",
+      "priority_weight": 10
+    },
+    {
+      "email": "client@acme.com",
+      "name": "John",
+      "role": "client",
+      "priority_weight": 9
+    },
+    {
+      "email": "manager@company.com",
+      "name": "Manager",
+      "role": "manager",
+      "priority_weight": 8
+    },
+    {
+      "email": "peer@company.com",
+      "name": "Ravi",
+      "role": "peer",
+      "priority_weight": 5
+    }
+  ]
+}
