@@ -7,6 +7,7 @@ import json
 import os
 from datetime import datetime
 from email.header import decode_header, make_header
+from email.message import EmailMessage
 from typing import Any
 
 import pytz
@@ -244,6 +245,27 @@ def get_unread_since(since_timestamp: str) -> list[dict]:
 
 
 def send_email(to: str, subject: str, body: str) -> bool:
-    """Sends email via Gmail API. Returns True on success."""
-    print("[ERROR][gmail_client] send_email is not implemented yet")
-    return False
+    """Sends a plain-text email via Gmail API (users.messages.send). Returns True on success."""
+    load_dotenv()
+    to_addr = (to or "").strip()
+    if not to_addr:
+        print("[ERROR][gmail_client] send_email: empty recipient")
+        return False
+    svc = _get_gmail_service()
+    if svc is None:
+        print("[ERROR][gmail_client] send_email: no Gmail service")
+        return False
+    try:
+        msg = EmailMessage()
+        msg.set_content(body or "", charset="utf-8")
+        msg["To"] = to_addr
+        msg["Subject"] = subject or "(no subject)"
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+        svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+        return True
+    except HttpError as e:
+        print(f"[ERROR][gmail_client] send_email HttpError: {e}")
+        return False
+    except Exception as e:
+        print(f"[ERROR][gmail_client] send_email failed: {e}")
+        return False

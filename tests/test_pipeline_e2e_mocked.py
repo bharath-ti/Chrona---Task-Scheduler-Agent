@@ -194,17 +194,23 @@ class TestDaemonEntrypoint(unittest.TestCase):
         mock_sleep,
         mock_run_pipeline,
     ) -> None:
-        import schedule
-
-        minutes_chain = MagicMock()
-        mock_every.return_value.minutes = minutes_chain
-        minutes_chain.do.return_value = None
+        minutes_root = MagicMock()
+        minutes_root.minutes.do.return_value = None
+        day_root = MagicMock()
+        at_ret = MagicMock()
+        day_root.day.at.return_value = at_ret
+        at_ret.do.return_value = None
+        mock_every.side_effect = [minutes_root, day_root]
 
         with self.assertRaises(KeyboardInterrupt):
             main.run_daemon_loop(poll_minutes=3, run_immediately=False)
 
-        mock_every.assert_called_once_with(3)
-        minutes_chain.do.assert_called_once()
+        self.assertEqual(mock_every.call_count, 2)
+        mock_every.assert_any_call(3)
+        mock_every.assert_any_call()
+        minutes_root.minutes.do.assert_called_once()
+        day_root.day.at.assert_called_once()
+        at_ret.do.assert_called_once()
         mock_run_pipeline.assert_not_called()
         mock_run_pending.assert_called()
 

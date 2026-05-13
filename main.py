@@ -1,7 +1,8 @@
 """
 Task Scheduler Agent — orchestrator.
 
-`run_pipeline()` runs M1 -> M2 -> M3 -> M4 -> M5. Use `--test` for a single run or `--daemon` for a timed loop (M6 not wired yet).
+`run_pipeline()` runs M1 -> M2 -> M3 -> M4 -> M5. `send_morning_digest()` is M6 (digest + clear store).
+Use `--test` / `--digest` for one-shots or `--daemon` for the timed loop.
 """
 
 from __future__ import annotations
@@ -196,6 +197,20 @@ def run_pipeline() -> dict[str, Any]:
     return summary
 
 
+def _normalize_digest_time(raw: str) -> str:
+    """Return HH:MM for schedule (leading zeros)."""
+    s = (raw or "08:00").strip()
+    parts = s.split(":")
+    if len(parts) != 2:
+        return "08:00"
+    try:
+        h = max(0, min(23, int(parts[0])))
+        m = max(0, min(59, int(parts[1])))
+    except ValueError:
+        return "08:00"
+    return f"{h:02d}:{m:02d}"
+
+
 def run_daemon_loop(
     poll_minutes: int | None = None,
     *,
@@ -205,18 +220,22 @@ def run_daemon_loop(
     Run `run_pipeline()` on an interval (production-style loop).
 
     Does not set CHRONA_SKIP_LAST_RUN_UPDATE (M1 advances last_run as configured).
+    Also schedules M6 morning digest at DIGEST_TIME (local clock for `schedule` library).
 
     Args:
         poll_minutes: Override interval; if None, uses CHRONA_POLL_MINUTES env or 5.
         run_immediately: If True, run one pipeline cycle before entering the wait loop.
     """
+    from modules.m6_digest import send_morning_digest
+
     pm = poll_minutes if poll_minutes is not None else int(os.getenv("CHRONA_POLL_MINUTES", "5"))
     pm = max(1, pm)
 
     your_name = os.getenv("YOUR_NAME", "")
     your_email = os.getenv("YOUR_EMAIL", "")
     tz = os.getenv("TIMEZONE", "Asia/Kolkata")
-    digest = os.getenv("DIGEST_TIME", "08:00")
+    digest_raw = os.getenv("DIGEST_TIME", "08:00")
+    digest = _normalize_digest_time(digest_raw)
     demo = os.getenv("DEMO_MODE", "false")
 
     def _job() -> None:
@@ -225,10 +244,18 @@ def run_daemon_loop(
         except Exception as e:
             print(f"[ERROR][daemon] run_pipeline: {e}")
 
+    def _digest_job() -> None:
+        try:
+            send_morning_digest()
+        except Exception as e:
+            print(f"[ERROR][daemon] send_morning_digest: {e}")
+
+    schedule.clear()
+
     print("=" * 50)
     print("Task Scheduler Agent (daemon)")
     print(f"Pipeline every {pm} minute(s) (M1->M2->M3->M4->M5)")
-    print(f"Morning digest time (env): {digest}")
+    print(f"Morning digest (M6) daily at: {digest} (from DIGEST_TIME={digest_raw!r})")
     print(f"User: {your_name} ({your_email})")
     print(f"Timezone: {tz}")
     print(f"DEMO_MODE: {demo}")
@@ -236,6 +263,11 @@ def run_daemon_loop(
     print("=" * 50)
 
     schedule.every(pm).minutes.do(_job)
+    try:
+        schedule.every().day.at(digest).do(_digest_job)
+    except Exception as e:
+        print(f"[ERROR][daemon] Could not schedule digest at {digest!r}: {e}")
+
     if run_immediately:
         _job()
 
@@ -269,20 +301,32 @@ def _parse_args() -> argparse.Namespace:
         metavar="N",
         help="With --daemon: poll interval in minutes (overrides CHRONA_POLL_MINUTES)",
     )
+    p.add_argument(
+        "--digest",
+        action="store_true",
+        help="Run M6 morning digest once (email + clear task_store), then exit",
+    )
     return p.parse_args()
 
 
 def main() -> None:
     load_dotenv()
     args = _parse_args()
-    if args.daemon and (args.test or args.m1_m2):
-        print("[ERROR] Use either --daemon or --test/--m1-m2, not both.")
+    exclusive = (args.test or args.m1_m2, args.daemon, args.digest)
+    if sum(1 for x in exclusive if x) > 1:
+        print("[ERROR] Use only one of: --test / --m1-m2, --daemon, or --digest.")
         sys.exit(2)
     if args.daemon:
         try:
             run_daemon_loop(args.poll_minutes)
         except KeyboardInterrupt:
             print("\n[daemon] Stopped.")
+        return
+    if args.digest:
+        from modules.m6_digest import send_morning_digest
+
+        ok = send_morning_digest()
+        print(json.dumps({"m6_digest_sent": ok}, indent=2))
         return
     if args.test or args.m1_m2:
         os.environ["CHRONA_SKIP_LAST_RUN_UPDATE"] = "true"
@@ -293,8 +337,9 @@ def main() -> None:
             os.environ.pop("CHRONA_SKIP_LAST_RUN_UPDATE", None)
         return
     print("Usage:")
-    print("  python main.py --test          # one-shot pipeline (skip last_run bump)")
-    print("  python main.py --daemon        # continuous M1->M5 every N minutes")
+    print("  python main.py --test          # one-shot M1->M5 (skip last_run bump)")
+    print("  python main.py --digest        # one-shot M6 digest + clear task_store")
+    print("  python main.py --daemon        # M1->M5 poll + daily M6 at DIGEST_TIME")
     print("  python scripts/continuous_unittest.py   # re-run unit tests on an interval")
 
 
